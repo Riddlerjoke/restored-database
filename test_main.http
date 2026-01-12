@@ -1,0 +1,51 @@
+# Test your FastAPI endpoints
+
+GET http://127.0.0.1:8000/
+Accept: application/json
+
+###
+
+GET http://127.0.0.1:8000/hello/User
+Accept: application/json
+
+###
+
+### Test FastAPI endpoints
+
+GET http://127.0.0.1:8000/
+Accept: application/json
+
+###
+
+GET http://127.0.0.1:8000/hello/User
+Accept: application/json
+
+###
+
+# List MongoDB collections
+GET http://127.0.0.1:8000/collections
+Accept: application/json
+
+###
+
+# Count documents from a collection
+GET http://127.0.0.1:8000/count?collection=my_collection
+Accept: application/json
+
+###
+
+# Upload and restore a CSV file into MongoDB
+# Replace the file path below with your local CSV path.
+POST http://127.0.0.1:8000/restore/csv?collection=my_collection&delimiter=%2C&drop_existing=true&batch_size=1000
+Accept: application/json
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="sample.csv"
+Content-Type: text/csv
+
+id,name,age
+1,John,30
+2,Jane,28
+
+--WebAppBoundary--

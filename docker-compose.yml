@@ -1,0 +1,46 @@
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: restore-mongodb
+    restart: unless-stopped
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-restore_db}
+
+  api:
+    build: .
+    container_name: restore-api
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    ports:
+      - "8001:8000"
+    environment:
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
+      MONGO_DB: ${MONGO_DB:-restore_db}
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8000
+    # If you want live-reload during dev, uncomment the following two lines
+    # volumes:
+    #   - ./:/app
+
+  mongo-express:
+    image: mongo-express:1.0.2-20
+    container_name: restore-mongo-express
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_URL: ${MONGO_URI:-mongodb://mongodb:27017}
+      ME_CONFIG_BASICAUTH_USERNAME: ${ME_USER:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${ME_PASSWORD:-admin}
+
+volumes:
+  mongo_data:
