@@ -42,5 +42,18 @@ services:
       ME_CONFIG_BASICAUTH_USERNAME: ${ME_USER:-admin}
       ME_CONFIG_BASICAUTH_PASSWORD: ${ME_PASSWORD:-admin}
 
+#  mongo-bi:
+#    image: mongodb/bi-connector:2.14.4
+#    container_name: restore-mongo-bi
+#    depends_on:
+#      - mongodb
+#    ports:
+#      - "3307:3307"
+#    command: >
+#      mongosqld
+#      --mongo-uri mongodb://mongodb:27017/restore_db
+#      --addr 0.0.0.0:3307
+
+
 volumes:
   mongo_data:

@@ -10,6 +10,7 @@ from endpoints.root import router as root_router
 from endpoints.db_admin import router as db_admin_router
 from endpoints.restore import router as restore_router
 from endpoints.analyse import router as analyse_router
+from endpoints.stats import router as stats_router
 
 
 
@@ -29,8 +30,8 @@ def get_app() -> FastAPI:
     app.include_router(root_router)
     app.include_router(db_admin_router)
     app.include_router(restore_router)
-
     app.include_router(analyse_router)
+    app.include_router(stats_router, prefix="/stats", tags=["stats"])
 
     return app
 
