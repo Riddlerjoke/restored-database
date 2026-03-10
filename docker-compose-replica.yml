@@ -1,0 +1,151 @@
+name: restored-database
+
+services:
+  mongo-keyfile-init:
+    image: mongo:7.0
+    container_name: restore-mongo-keyfile-init
+    entrypoint: []
+    command: ["bash", "-lc", "set -euxo pipefail; mkdir -p /keyfile; if [ ! -s /keyfile/keyfile ]; then echo Generating keyfile...; head -c 756 /dev/urandom | base64 | tr -d '\n' > /keyfile/keyfile; else echo Keyfile already exists.; fi; chown 999:999 /keyfile/keyfile; chmod 400 /keyfile/keyfile; echo Keyfile content size: $(wc -c </keyfile/keyfile); ls -l /keyfile; test -s /keyfile/keyfile" ]
+    volumes:
+      - mongo_keyfile:/keyfile
+    restart: "no"
+    networks:
+      - backend
+
+  mongo1:
+    image: mongo:7.0
+    container_name: restore-mongo1
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    # CORRECTION: Pas d'entrypoint: [], on laisse l'entrypoint officiel créer l'utilisateur root
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile"]
+    ports:
+      - "27019:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - mongo1_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      # CORRECTION: mot de passe par défaut admin123
+      test: ["CMD-SHELL", "test -s /etc/mongo-keyfile/keyfile && mongosh --quiet -u \"${MONGO_INITDB_ROOT_USERNAME:-admin}\" -p \"${MONGO_INITDB_ROOT_PASSWORD:-admin123}\" --authenticationDatabase admin --eval \"db.adminCommand('ping')\" >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - backend
+
+  mongo2:
+    image: mongo:7.0
+    container_name: restore-mongo2
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile"]
+    ports:
+      - "27020:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - mongo2_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /etc/mongo-keyfile/keyfile && mongosh --quiet -u \"${MONGO_INITDB_ROOT_USERNAME:-admin}\" -p \"${MONGO_INITDB_ROOT_PASSWORD:-admin123}\" --authenticationDatabase admin --eval \"db.adminCommand('ping')\" >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - backend
+
+  mongo3:
+    image: mongo:7.0
+    container_name: restore-mongo3
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile"]
+    ports:
+      - "27021:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - mongo3_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /etc/mongo-keyfile/keyfile && mongosh --quiet -u \"${MONGO_INITDB_ROOT_USERNAME:-admin}\" -p \"${MONGO_INITDB_ROOT_PASSWORD:-admin123}\" --authenticationDatabase admin --eval \"db.adminCommand('ping')\" >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - backend
+
+  mongo-setup:
+    image: mongo:7.0
+    container_name: restore-mongo-setup
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
+    entrypoint: []
+    command: ["bash", "-lc", "mongosh --host mongo1:27017 -u \"${MONGO_INITDB_ROOT_USERNAME:-admin}\" -p \"${MONGO_INITDB_ROOT_PASSWORD:-admin123}\" --authenticationDatabase admin --eval 'try { rs.status() } catch (e) { rs.initiate({_id:\"rs0\", members:[{_id:0, host:\"mongo1:27017\", priority:2, votes:1}, {_id:1, host:\"mongo2:27017\", priority:1, votes:1}, {_id:2, host:\"mongo3:27017\", priority:1, votes:1}]}); } rs.status()' "]
+    restart: "no"
+    networks:
+      - backend
+
+  api:
+    build: .
+    container_name: restore-api
+    restart: unless-stopped
+    depends_on:
+      # CORRECTION: dépendre de mongo-setup, pas seulement mongo1
+      mongo-setup:
+        condition: service_completed_successfully
+    ports:
+      - "8002:8000"
+    environment:
+      # CORRECTION: restore_db au lieu de yourdb
+      MONGO_URI: ${MONGO_URI:-mongodb://admin:admin123@mongo1:27017,mongo2:27017,mongo3:27017/restore_db?replicaSet=rs0&authSource=admin&retryWrites=true&w=majority}
+      MONGO_DB: ${MONGO_DB:-restore_db}
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8000
+    networks:
+      - backend
+
+  mongo-express:
+    image: mongo-express:1.0.2-20
+    container_name: restore-mongo-express
+    restart: unless-stopped
+    depends_on:
+      # CORRECTION: dépendre de mongo-setup
+      mongo-setup:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_BASICAUTH_USERNAME: ${ME_USER:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${ME_PASSWORD:-admin}
+      # CORRECTION: restore_db au lieu de yourdb
+      ME_CONFIG_MONGODB_URL: ${MONGO_URI:-mongodb://admin:admin123@mongo1:27017,mongo2:27017,mongo3:27017/restore_db?replicaSet=rs0&authSource=admin}
+    networks:
+      - backend
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  mongo_keyfile:
+    name: restored-database_mongo_keyfile
+
+networks:
+  backend:

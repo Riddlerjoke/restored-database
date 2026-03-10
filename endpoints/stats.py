@@ -190,7 +190,7 @@ async def hosts_with_more_than(
     limit: int = Query(2_000_000, ge=1, le=2_000_000),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    """Les hôtes avec plus de N annonces (comptage réel des annonces)."""
+    """changement de logique pour le nombre de listings par host """
     df = await _load_df(db, {"_id": 0, "host_id": 1}, limit=limit)
     if df.is_empty():
         return []
