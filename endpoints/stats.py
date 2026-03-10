@@ -11,7 +11,7 @@ from core.deps import get_db
 router = APIRouter(tags=["stats"])
 
 # Adapte si ta collection s’appelle autrement
-COLL = "listingparis"
+COLL = "listing"
 
 
 # -------------------------

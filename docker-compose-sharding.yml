@@ -1,0 +1,343 @@
+name: restored-database-sharded
+
+services:
+  # ========================================
+  # 1. GÉNÉRATION DU KEYFILE (partagé)
+  # ========================================
+  mongo-keyfile-init:
+    image: mongo:7.0
+    container_name: restore-keyfile-init
+    entrypoint: []
+    command: ["bash", "-lc", "set -euxo pipefail; mkdir -p /keyfile; if [ ! -s /keyfile/keyfile ]; then echo 'Generating keyfile...'; head -c 756 /dev/urandom | base64 | tr -d '\n' > /keyfile/keyfile; else echo 'Keyfile exists'; fi; chown 999:999 /keyfile/keyfile; chmod 400 /keyfile/keyfile; echo 'Keyfile size:' $(wc -c </keyfile/keyfile); ls -l /keyfile; test -s /keyfile/keyfile"]
+    volumes:
+      - mongo_keyfile:/keyfile
+    restart: "no"
+    networks:
+      - sharded-net
+
+  # ========================================
+  # 2. CONFIG SERVER (replica set - 1 nœud en dev)
+  # ========================================
+  configsvr1:
+    image: mongo:7.0
+    container_name: restore-configsvr1
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--configsvr", "--replSet", "configReplSet", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27019"]
+    ports:
+      - "27019:27019"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - configsvr1_data:/data/configdb
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27019 --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  # Init config server replica set
+  configsvr-setup:
+    image: mongo:7.0
+    container_name: restore-configsvr-setup
+    depends_on:
+      configsvr1:
+        condition: service_healthy
+    entrypoint: []
+    command: ["bash", "-lc", "mongosh --host configsvr1:27019 -u admin -p admin123 --authenticationDatabase admin --eval 'try { rs.status() } catch (e) { rs.initiate({_id:\"configReplSet\", configsvr:true, members:[{_id:0, host:\"configsvr1:27019\"}]}); } rs.status()'"]
+    restart: "no"
+    networks:
+      - sharded-net
+
+  # ========================================
+  # 3. SHARD PARIS (replica set - 3 nœuds)
+  # ========================================
+  shard-paris1:
+    image: mongo:7.0
+    container_name: restore-shard-paris1
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--shardsvr", "--replSet", "shardParis", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27018"]
+    ports:
+      - "27101:27018"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - shard_paris1_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27018 --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  shard-paris2:
+    image: mongo:7.0
+    container_name: restore-shard-paris2
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--shardsvr", "--replSet", "shardParis", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27018"]
+    ports:
+      - "27102:27018"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - shard_paris2_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27018 --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  shard-paris3:
+    image: mongo:7.0
+    container_name: restore-shard-paris3
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--shardsvr", "--replSet", "shardParis", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27018"]
+    ports:
+      - "27103:27018"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - shard_paris3_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27018 --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  # Init shard Paris replica set
+  shard-paris-setup:
+    image: mongo:7.0
+    container_name: restore-shard-paris-setup
+    depends_on:
+      shard-paris1:
+        condition: service_healthy
+      shard-paris2:
+        condition: service_healthy
+      shard-paris3:
+        condition: service_healthy
+    entrypoint: []
+    command: ["bash", "-lc", "mongosh --host shard-paris1:27018 -u admin -p admin123 --authenticationDatabase admin --eval 'try { rs.status() } catch (e) { rs.initiate({_id:\"shardParis\", members:[{_id:0, host:\"shard-paris1:27018\"}, {_id:1, host:\"shard-paris2:27018\"}, {_id:2, host:\"shard-paris3:27018\"}]}); } rs.status()'"]
+    restart: "no"
+    networks:
+      - sharded-net
+
+  # ========================================
+  # 4. SHARD LYON (replica set - 3 nœuds)
+  # ========================================
+  shard-lyon1:
+    image: mongo:7.0
+    container_name: restore-shard-lyon1
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--shardsvr", "--replSet", "shardLyon", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27018"]
+    ports:
+      - "27201:27018"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - shard_lyon1_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27018 --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  shard-lyon2:
+    image: mongo:7.0
+    container_name: restore-shard-lyon2
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--shardsvr", "--replSet", "shardLyon", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27018"]
+    ports:
+      - "27202:27018"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - shard_lyon2_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27018 --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  shard-lyon3:
+    image: mongo:7.0
+    container_name: restore-shard-lyon3
+    depends_on:
+      mongo-keyfile-init:
+        condition: service_completed_successfully
+    command: ["mongod", "--shardsvr", "--replSet", "shardLyon", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27018"]
+    ports:
+      - "27203:27018"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:-admin123}
+    volumes:
+      - shard_lyon3_data:/data/db
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --port 27018 --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  # Init shard Lyon replica set
+  shard-lyon-setup:
+    image: mongo:7.0
+    container_name: restore-shard-lyon-setup
+    depends_on:
+      shard-lyon1:
+        condition: service_healthy
+      shard-lyon2:
+        condition: service_healthy
+      shard-lyon3:
+        condition: service_healthy
+    entrypoint: []
+    command: ["bash", "-lc", "mongosh --host shard-lyon1:27018 -u admin -p admin123 --authenticationDatabase admin --eval 'try { rs.status() } catch (e) { rs.initiate({_id:\"shardLyon\", members:[{_id:0, host:\"shard-lyon1:27018\"}, {_id:1, host:\"shard-lyon2:27018\"}, {_id:2, host:\"shard-lyon3:27018\"}]}); } rs.status()'"]
+    restart: "no"
+    networks:
+      - sharded-net
+
+  # ========================================
+  # 5. MONGOS (router)
+  # ========================================
+  mongos:
+    image: mongo:7.0
+    container_name: restore-mongos
+    depends_on:
+      configsvr-setup:
+        condition: service_completed_successfully
+      shard-paris-setup:
+        condition: service_completed_successfully
+      shard-lyon-setup:
+        condition: service_completed_successfully
+    command: ["mongos", "--configdb", "configReplSet/configsvr1:27019", "--bind_ip_all", "--keyFile", "/etc/mongo-keyfile/keyfile", "--port", "27017"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_keyfile:/etc/mongo-keyfile:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet -u admin -p admin123 --authenticationDatabase admin --eval 'db.adminCommand({ping:1})' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - sharded-net
+
+  # ========================================
+  # 6. INITIALISATION DU CLUSTER SHARDÉ
+  # ========================================
+  sharded-cluster-init:
+    image: mongo:7.0
+    container_name: restore-sharded-init
+    depends_on:
+      mongos:
+        condition: service_healthy
+    entrypoint: []
+    command: ["bash", "-lc", "
+      mongosh --host mongos:27017 -u admin -p admin123 --authenticationDatabase admin --eval '
+        sh.addShard(\"shardParis/shard-paris1:27018,shard-paris2:27018,shard-paris3:27018\");
+        sh.addShard(\"shardLyon/shard-lyon1:27018,shard-lyon2:27018,shard-lyon3:27018\");
+        sh.enableSharding(\"restore_db\");
+        sh.status();
+      '
+    "]
+    restart: "no"
+    networks:
+      - sharded-net
+
+  # ========================================
+  # 7. API (connectée au mongos)
+  # ========================================
+  api:
+    build: .
+    container_name: restore-api
+    restart: unless-stopped
+    depends_on:
+      sharded-cluster-init:
+        condition: service_completed_successfully
+    ports:
+      - "8002:8000"
+    environment:
+      MONGO_URI: mongodb://admin:admin123@mongos:27017/restore_db?authSource=admin&retryWrites=true&w=majority
+      MONGO_DB: restore_db
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 8000
+    networks:
+      - sharded-net
+
+  # ========================================
+  # 8. MONGO-EXPRESS (connecté au mongos)
+  # ========================================
+  mongo-express:
+    image: mongo-express:1.0.2-20
+    container_name: restore-mongo-express
+    restart: unless-stopped
+    depends_on:
+      sharded-cluster-init:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin123
+      ME_CONFIG_MONGODB_URL: mongodb://admin:admin123@mongos:27017/restore_db?authSource=admin
+    networks:
+      - sharded-net
+
+volumes:
+  mongo_keyfile:
+    name: restored-database-sharded_keyfile
+  configsvr1_data:
+  shard_paris1_data:
+  shard_paris2_data:
+  shard_paris3_data:
+  shard_lyon1_data:
+  shard_lyon2_data:
+  shard_lyon3_data:
+
+networks:
+  sharded-net:
